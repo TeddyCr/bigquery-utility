@@ -1,3 +1,4 @@
+from __future__ import print_function
 from google.cloud import bigquery
 import pandas as pd
 from hurry.filesize import size
