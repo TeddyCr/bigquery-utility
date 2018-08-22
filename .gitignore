@@ -1,0 +1,6 @@
+*.vscode
+*.bat
+*.pyc
+
+#Virutalenv
+bigquery-utility/
