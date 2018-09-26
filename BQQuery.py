@@ -1,7 +1,7 @@
 from __future__ import print_function
 from google.cloud import bigquery
 import pandas as pd
-from hurry.filesize import size
+#from hurry.filesize import size
 
 class Query(object):
     """
@@ -89,8 +89,29 @@ class Query(object):
             elif answer[0].lower() == 'y':
                 return 'Query execution has been aborded by user'
             else:
-                raise ValueError('System could not understand user input. Make sure you\'ve entered "y" or "n"')             
+                raise ValueError('System could not understand user input. Make sure you\'ve entered "y" or "n"')    
 
+    def queryToTable(self, q, dataset=None, destination_table=None):
+        client = bigquery.Client()
+        datatset_ref = client.dataset(dataset)
+        table_ref = datatset_ref.table(destination_table)
+
+        job_config = bigquery.QueryJobConfig()
+        job_config.destination = table_ref
+
+        q = q
+
+        if float(bigquery.__version__[:-2]) >= 0.32:
+            query_job = client.query(q, location='US', job_config=job_config)
+            query_job.result()
+
+            return query_job
+        
+        else:
+            query_job = client.query(q,job_config=job_config)
+            query_job.result()
+
+            return query_job        
 
     def safeQuery(self, query, location, legacy):
         query_config = bigquery.QueryJobConfig()
@@ -102,7 +123,7 @@ class Query(object):
             query_job = self.client.query(query, location=location, job_config=query_config)
         else:
             query_job = self.client.query(query, job_config=query_config)
-        processed_size = size(query_job.total_bytes_processed)
+        processed_size = query_job.total_bytes_processed
 
         print(f'Your query will process {processed_size}, do you want to processed? [y/n]')
         answer = input()

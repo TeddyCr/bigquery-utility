@@ -18,7 +18,7 @@ class UploadGBQ(object):
         - write_disposition: write disposition for the table creation - STRING + 3 OPTIONS -> WRITE_EMPTY, WRITE_TRUNCATE, WRITE_APPEND
     """
     
-    def __init__(self, file=None, dataset_id=None, table_id=None, location='US', retention=32,jagged_row=None, auto_detect=False, schema=[], leading_row=0, file_format='CSV', write_disposition='WRITE_EMPTY'):
+    def __init__(self, file=None, dataset_id=None, table_id=None, location='US', partition_field=None, retention=32,jagged_row=None, auto_detect=False, schema=[], leading_row=0, file_format='CSV', write_disposition='WRITE_EMPTY'):
         if not file:
             raise ValueError("Error, file path is required")
         else:
@@ -36,6 +36,7 @@ class UploadGBQ(object):
             raise ValueError('You must either provide a schema or set auto_detect=True')
 
         self.location = location
+        self.partition_field = partition_field
         self.retention = retention
         self.jagged_row = jagged_row 
         self.auto_detect = auto_detect 
@@ -60,7 +61,8 @@ class UploadGBQ(object):
             job_config.allow_jagged_rows = self.jagged_row
         if self.auto_detect:
             job_config.autodetect = self.auto_detect
-        if len(self.schema) > 0:
+
+        if len(self.schema) > 0 and self.auto_detect != True:
             sch = []
             for i in range(len(self.schema)):
                 sch.append(bigquery.SchemaField(self.schema[i][0], self.schema[i][1]))
@@ -68,12 +70,17 @@ class UploadGBQ(object):
         if self.leading_row > 0:
             job_config.skip_leading_rows = self.leading_row
         
+        if self.partition_field:
+            job_config._properties['load']['timePartitioning'] = {'type':'DAY', 'field': f'{self.partition_field}'}
+        
         job_config.write_disposition = self.write_disposition
 
         ## location argument and bigquery.SourceFormat.CSV only available starting v0.32.0
-        if bigquery.__version__ == '0.32.0':
+        if float(bigquery.__version__[:-2]) >= 0.32:
             if self.file_format == 'CSV':
                 job_config.source_format = bigquery.SourceFormat.CSV
+            else:
+                raise ValueError(f'Incorrect file format "{self.file_format}". Please enter "CSV" as the file format')
 
             try: 
                 with open(filename, 'rb') as csv_source_file:
@@ -82,8 +89,8 @@ class UploadGBQ(object):
                 job.result()
 
                 table = client.get_table(table_ref)
-                expiration_time = datetime.now() + timedelta(days=self.retention)
-                table.expires = expiration_time
+                expiration_date = datetime.now() + timedelta(days=self.retention)
+                table.expires = expiration_date
                 client.update_table(table, ['expires'])
 
                 print(f"Upload Success. {job.output_rows} rows loaded at `{job.project}.{self.dataset_id}.{self.table_id}` ")
@@ -99,11 +106,80 @@ class UploadGBQ(object):
                 job.result()
 
                 table = client.get_table(table_ref)
-                expiration_time = datetime.now() + timedelta(days=self.retention)
-                table.expires = expiration_time
+                expiration_date = datetime.now() + timedelta(days=self.retention)
+                table.expires = expiration_date
                 client.update_table(table, ['expires'])
 
                 print(f"Upload Success. {job.output_rows} rows loaded at `{job.project}.{self.dataset_id}.{self.table_id}` ")
                 return True
             except:
                 raise
+
+    def uploadToGBQ_JSON(self):
+
+        client = bigquery.Client()
+
+        dataset_ref = client.dataset(self.dataset_id)
+        table_ref = dataset_ref.table(self.table_id)
+        filename = self.file
+
+        job_config = bigquery.LoadJobConfig()
+
+        if self.partition_field:
+            job_config._properties['load']['timePartitioning'] = {'type': 'DAY', 'field':f'{self.partition_field}'}
+
+        if self.jagged_row:
+            job_config.allow_jagged_rows = self.jagged_row
+
+        if self.auto_detect:
+            job_config.autodetect = self.auto_detect
+
+        if len(self.schema) > 0 and self.auto_detect != True:
+            sch = []
+            for i in self.schema:
+                sch.append(bigquery.SchemaField(self.schema[i][0],self.schema[i][1]))
+            job_config.schema = sch
+        
+        if self.leading_row > 0:
+            job_config.skip_leading_rows = self.leading_row
+
+        job_config.write_disposition = self.write_disposition
+
+        if float(bigquery.__version__[:-2]) >= 0.32:
+            if self.file_format == 'JSON':
+                job_config.source_format = bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
+            else:
+                raise ValueError(f'Incorrect file format {self.file_format}. Please enter "JSON" as the file format')
+
+            try:
+                with open(filename, 'rb') as json_source_file:
+                    job = client.load_table_from_file(json_source_file,table_ref, dataset_ref, location=self.location, job_config=job_config)
+
+                job.result()
+
+                table = client.get_table(table_ref)
+                expiration_date = datetime.now() + timedelta(days=self.retention)
+                table.expires = expiration_date
+                client.update_table(table, ['expires'])
+
+                print(f"Upload Success. {job.output_rows} rows loaded at `{job.project}.{self.dataset_id}.{self.table_id}` ")
+                return True
+            except:
+                raise
+
+        else:
+            try:
+                with open(filename, 'rb') as json_source_file:
+                    job = client.load_table_from_file(json_source_file,table_ref, dataset_ref, job_config=job_config)
+
+                job.result()
+
+                table = client.get_table(table_ref)
+                expiration_date = datetime.now() + timedelta(days=self.retention)
+                table.expires = expiration_date
+                client.update_table(table, ['expires'])
+
+                print(f"Upload Success. {job.output_rows} rows loaded at `{job.project}.{self.dataset_id}.{self.table_id}` ")
+                return True
+            except:
+                raise                    
